@@ -5,6 +5,10 @@ import path from "path";
 
 // https://vite.dev/config/
 export default defineConfig({
+  base: "./",
+  define: {
+    global: "window",
+  },
   plugins: [react(), tailwindcss()],
   resolve: {
     alias: {

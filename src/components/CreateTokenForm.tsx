@@ -25,7 +25,7 @@ import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Loader2, Coins, Zap } from 'lucide-react';
+import { Loader2, Coins, Zap, Upload, Copy, ExternalLink, X, File, Database } from 'lucide-react';
 import { toast } from 'sonner';
 import type { TokenMetadata } from '@/hooks/useTokenRegistry';
 import type { NetworkType } from '@/contexts/WalletProvider';
@@ -51,6 +51,13 @@ export const CreateTokenForm: FC<CreateTokenFormProps> = ({ network, onTokenCrea
     image: '',
     description: '',
   });
+
+  // Image upload metadata
+  const [imageMetadata, setImageMetadata] = useState<{
+    filename: string;
+    size: number;
+    cid: string;
+  } | null>(null);
 
   const handleInputChange = (field: string, value: string) => {
     setFormData(prev => ({ ...prev, [field]: value }));
@@ -81,8 +88,13 @@ export const CreateTokenForm: FC<CreateTokenFormProps> = ({ network, onTokenCrea
       setUploadingImage(true);
       toast.info('Uploading image to IPFS...');
 
-      const imageUrl = await uploadImageToPinata(file);
-      setFormData(prev => ({ ...prev, image: imageUrl }));
+      const result = await uploadImageToPinata(file);
+      setFormData(prev => ({ ...prev, image: result.gatewayUrl }));
+      setImageMetadata({
+        filename: file.name,
+        size: file.size,
+        cid: result.cid,
+      });
 
       toast.success('Image uploaded successfully!');
     } catch (error) {
@@ -90,6 +102,25 @@ export const CreateTokenForm: FC<CreateTokenFormProps> = ({ network, onTokenCrea
       toast.error('Failed to upload image');
     } finally {
       setUploadingImage(false);
+    }
+  };
+
+  const handleRemoveImage = () => {
+    setFormData(prev => ({ ...prev, image: '' }));
+    setImageMetadata(null);
+  };
+
+  const handleCopyCID = () => {
+    if (imageMetadata?.cid) {
+      navigator.clipboard.writeText(imageMetadata.cid);
+      toast.success('CID copied to clipboard!');
+    }
+  };
+
+  const handleCopyURL = () => {
+    if (formData.image) {
+      navigator.clipboard.writeText(formData.image);
+      toast.success('URL copied to clipboard!');
     }
   };
 
@@ -327,11 +358,12 @@ export const CreateTokenForm: FC<CreateTokenFormProps> = ({ network, onTokenCrea
       console.log('✓ Flash payer generated:', flashPayer.publicKey.toString());
 
       // Calculate minimal funding required:
+      // FOR NOW: Light tokens DON'T support metadata (pending SDK update)
       // - Mint creation: ~1,500 lamports (Light Protocol sponsor rent)
       // - Mint to operation: ~1,000 lamports (State tree update)
-      // - Transaction fees: ~10,000 lamports (2 txs @ 5k each)
-      // - Safety buffer: ~2,500 lamports
-      // Total: 0.005 SOL (much cheaper than 0.01!)
+      // - Transaction fees: ~15,000 lamports (3 txs @ 5k each)
+      // - Safety buffer: ~500,000 lamports
+      // Total: ~0.00052 SOL. We fund 0.005 SOL to be safe.
       const fundAmount = 5_000_000; // 0.005 SOL in lamports
       console.log('Step 2: Funding flash wallet with', (fundAmount / 1e9).toFixed(4), 'SOL...');
 
@@ -387,6 +419,13 @@ export const CreateTokenForm: FC<CreateTokenFormProps> = ({ network, onTokenCrea
       console.log('  Mint signature:', mintSignature);
 
       let finalSignature = mintSignature;
+
+      // NOTE: Light Protocol compressed tokens currently do NOT support Metaplex metadata
+      // Light Protocol has native metadata support via Token-2022 extensions, but it's not
+      // yet available in the current SDK version. For now, Light tokens work without metadata.
+      // Metadata support will be added in a future update.
+      console.log('⚠️  Light tokens currently do not support metadata in this version');
+      console.log('   Token will work fine but won\'t show name/logo in wallets yet');
 
       // Step 4: Mint tokens to user (if initial supply specified)
       if (initialSupply > 0) {
@@ -618,13 +657,9 @@ export const CreateTokenForm: FC<CreateTokenFormProps> = ({ network, onTokenCrea
               <p className="text-sm text-muted-foreground">
                 Compressed token using Light Protocol. Lower cost (~99% cheaper), higher scalability.
               </p>
-              <div className="bg-yellow-500/10 border border-yellow-500/20 rounded-lg p-3">
-                <p className="text-sm text-yellow-600 dark:text-yellow-500">
-                  ⚠️ <strong>Note:</strong> Light tokens will show as "Unknown" in wallets and explorers.
-                  Compressed tokens don't support on-chain metadata yet.
-                  Use SPL tokens if you need custom name/logo display.
-                </p>
-              </div>
+              <p className="text-xs text-yellow-600 dark:text-yellow-500">
+                ⚠️ Note: Light tokens currently don't support metadata (name/logo) in wallets. This will be added in a future SDK update.
+              </p>
             </div>
           </TabsContent>
         </Tabs>
@@ -682,85 +717,160 @@ export const CreateTokenForm: FC<CreateTokenFormProps> = ({ network, onTokenCrea
             </div>
           </div>
 
-          {tokenType === 'spl' && (
-            <>
-              <div className="space-y-2">
-                <Label htmlFor="image">
-                  Token Image (optional)
-                  <span className="text-xs text-muted-foreground ml-2">
-                    Makes your token show up with logo in wallets
-                  </span>
-                </Label>
+          <div className="space-y-2">
+            <Label htmlFor="image">
+              Token Image (optional)
+              <span className="text-xs text-muted-foreground ml-2">
+                Makes your token show up with logo in wallets
+              </span>
+            </Label>
 
-                {isPinataConfigured() ? (
-                  <>
-                    <div className="flex gap-2">
-                      <Input
-                        id="image-file"
-                        type="file"
-                        accept="image/*"
-                        onChange={handleImageUpload}
-                        disabled={uploadingImage}
-                        className="flex-1"
-                      />
-                      {uploadingImage && (
-                        <Button disabled size="icon" variant="outline">
-                          <Loader2 className="h-4 w-4 animate-spin" />
-                        </Button>
-                      )}
-                    </div>
-                    {formData.image && (
-                      <div className="flex items-center gap-2 p-2 bg-muted rounded-md">
-                        <img
-                          src={formData.image}
-                          alt="Token"
-                          className="w-10 h-10 rounded object-cover"
-                        />
-                        <p className="text-xs text-muted-foreground flex-1 truncate">
-                          {formData.image}
-                        </p>
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => handleInputChange('image', '')}
-                        >
-                          Remove
-                        </Button>
+            {isPinataConfigured() ? (
+              <>
+                {!formData.image ? (
+                  <div className="border-2 border-dashed border-muted-foreground/25 rounded-lg p-6 hover:border-muted-foreground/50 transition-colors">
+                    <div className="flex items-start gap-4">
+                      <div className="flex items-center justify-center w-16 h-16 rounded-lg bg-muted">
+                        <Upload className="w-8 h-8 text-muted-foreground" />
                       </div>
-                    )}
-                    <p className="text-xs text-muted-foreground">
-                      ✨ Image will be auto-uploaded to IPFS via Pinata
-                    </p>
-                  </>
+                      <div className="flex-1">
+                        <h4 className="font-semibold mb-1">Upload Icon</h4>
+                        <p className="text-sm text-muted-foreground mb-3">
+                          Drag & drop or click to select. Stored permanently on IPFS.
+                        </p>
+                        <div className="flex gap-2 mb-3">
+                          <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full border text-xs">
+                            <File className="w-3 h-3" />
+                            <span>PNG, JPG, SVG, GIF, WEBP</span>
+                          </div>
+                          <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full border text-xs">
+                            <Database className="w-3 h-3" />
+                            <span>Max 5MB</span>
+                          </div>
+                        </div>
+                        <Input
+                          id="image-file"
+                          type="file"
+                          accept="image/*"
+                          onChange={handleImageUpload}
+                          disabled={uploadingImage}
+                          className="cursor-pointer"
+                        />
+                        {uploadingImage && (
+                          <div className="flex items-center gap-2 mt-3 text-sm text-muted-foreground">
+                            <Loader2 className="w-4 w-4 animate-spin" />
+                            <span>Uploading to IPFS...</span>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
                 ) : (
-                  <>
-                    <Input
-                      id="image"
-                      type="url"
-                      placeholder="https://blush-tragic-goat-277.mypinata.cloud/ipfs/..."
-                      value={formData.image}
-                      onChange={(e) => handleInputChange('image', e.target.value)}
-                    />
-                    <p className="text-xs text-muted-foreground">
-                      💡 Upload to <a href="https://imgur.com/upload" target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">Imgur</a> or <a href="https://nft.storage" target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">NFT.Storage</a>, then paste URL here
-                    </p>
-                  </>
-                )}
-              </div>
+                  <div className="border-2 border-green-500/20 bg-green-500/5 rounded-lg p-4">
+                    <div className="flex items-start gap-4">
+                      <img
+                        src={formData.image}
+                        alt="Token"
+                        className="w-32 h-32 rounded-lg object-cover border-2 border-border"
+                      />
+                      <div className="flex-1 space-y-3">
+                        <div className="flex items-center gap-2">
+                          <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border bg-background text-xs flex-1 min-w-0">
+                            <File className="w-3 h-3 flex-shrink-0" />
+                            <span className="truncate">
+                              {imageMetadata?.filename || 'image'}
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border bg-background text-xs">
+                            <Database className="w-3 h-3" />
+                            <span>
+                              {imageMetadata?.size
+                                ? `${(imageMetadata.size / 1024).toFixed(2)} KB`
+                                : 'N/A'}
+                            </span>
+                          </div>
+                        </div>
 
-              <div className="space-y-2">
-                <Label htmlFor="description">Description (optional)</Label>
-                <Textarea
-                  id="description"
-                  placeholder="Describe your token..."
-                  value={formData.description}
-                  onChange={(e) => handleInputChange('description', e.target.value)}
-                  rows={3}
+                        {imageMetadata?.cid && (
+                          <div className="flex items-center gap-2 p-2 rounded-lg border bg-green-500/10 border-green-500/20">
+                            <span className="text-xs font-mono flex-1 truncate">
+                              {imageMetadata.cid}
+                            </span>
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="ghost"
+                              onClick={handleCopyCID}
+                              className="h-7 text-xs"
+                            >
+                              <Copy className="w-3 h-3 mr-1" />
+                              Copy
+                            </Button>
+                          </div>
+                        )}
+
+                        <div className="flex gap-2">
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            onClick={() => window.open(formData.image, '_blank')}
+                            className="flex-1"
+                          >
+                            <ExternalLink className="w-3 h-3 mr-1" />
+                            View
+                          </Button>
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            onClick={handleCopyURL}
+                            className="flex-1"
+                          >
+                            <Copy className="w-3 h-3 mr-1" />
+                            Copy URL
+                          </Button>
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="destructive"
+                            onClick={handleRemoveImage}
+                          >
+                            <X className="w-3 h-3 mr-1" />
+                            Remove
+                          </Button>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </>
+            ) : (
+              <>
+                <Input
+                  id="image"
+                  type="url"
+                  placeholder="https://blush-tragic-goat-277.mypinata.cloud/ipfs/..."
+                  value={formData.image}
+                  onChange={(e) => handleInputChange('image', e.target.value)}
                 />
-              </div>
-            </>
-          )}
+                <p className="text-xs text-muted-foreground">
+                  💡 Upload to <a href="https://imgur.com/upload" target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">Imgur</a> or <a href="https://nft.storage" target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">NFT.Storage</a>, then paste URL here
+                </p>
+              </>
+            )}
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="description">Description (optional)</Label>
+            <Textarea
+              id="description"
+              placeholder="Describe your token..."
+              value={formData.description}
+              onChange={(e) => handleInputChange('description', e.target.value)}
+              rows={3}
+            />
+          </div>
 
           <Button
             type="submit"

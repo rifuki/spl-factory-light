@@ -5,11 +5,9 @@
 
 import { PinataSDK, type UploadResponse } from 'pinata';
 
-const GATEWAY_DOMAIN = import.meta.env.VITE_PINATA_GATEWAY || 'gateway.pinata.cloud';
-
 const pinata = new PinataSDK({
   pinataJwt: import.meta.env.VITE_PINATA_JWT,
-  pinataGateway: GATEWAY_DOMAIN,
+  pinataGateway: import.meta.env.VITE_PINATA_GATEWAY,
 });
 
 export type PinataUploadResponse = UploadResponse & {
@@ -32,10 +30,14 @@ type Metadata = {
 
 class PinataService {
   /**
-   * Convert CID to gateway URL
+   * Generate unique filename to avoid collisions
+   * Format: {timestamp}-{random}-{originalName}
    */
-  private cidToGatewayUrl(cid: string): string {
-    return `https://${GATEWAY_DOMAIN}/ipfs/${cid}`;
+  private generateUniqueFilename(originalName: string): string {
+    const timestamp = Date.now();
+    const randomStr = Math.random().toString(36).substring(2, 8);
+    const sanitized = originalName.replace(/[^a-zA-Z0-9.-]/g, '-');
+    return `${timestamp}-${randomStr}-${sanitized}`;
   }
 
   /**
@@ -52,15 +54,20 @@ class PinataService {
       console.log('📤 Uploading file to Pinata IPFS...');
       console.log('  File:', file.name, `(${(file.size / 1024).toFixed(2)} KB)`);
 
+      // Generate unique filename to avoid collisions
+      const uniqueName = metadata?.name
+        ? this.generateUniqueFilename(metadata.name)
+        : this.generateUniqueFilename(file.name);
+
       let uploadBuilder = pinata.upload.public.file(file);
-      if (metadata?.name) uploadBuilder = uploadBuilder.name(metadata.name);
+      uploadBuilder = uploadBuilder.name(uniqueName);
       if (metadata?.keyvalues) uploadBuilder = uploadBuilder.keyvalues(metadata.keyvalues);
 
       const uploadResponse = await uploadBuilder;
       console.log('  Upload response:', uploadResponse);
 
-      // Convert CID to URL using gateway
-      const gatewayUrl = this.cidToGatewayUrl(uploadResponse.cid);
+      // Convert CID to URL using gateway (CORRECT WAY!)
+      const gatewayUrl = await pinata.gateways.public.convert(uploadResponse.cid);
 
       console.log('✅ File uploaded successfully!');
       console.log('  CID:', uploadResponse.cid);
@@ -89,15 +96,20 @@ class PinataService {
       console.log('📤 Uploading JSON to Pinata IPFS...');
       console.log('  JSON:', json);
 
+      // Generate unique filename to avoid collisions
+      const uniqueName = metadata?.name
+        ? this.generateUniqueFilename(metadata.name)
+        : this.generateUniqueFilename('metadata.json');
+
       let uploadBuilder = pinata.upload.public.json(json);
-      if (metadata?.name) uploadBuilder = uploadBuilder.name(metadata.name);
+      uploadBuilder = uploadBuilder.name(uniqueName);
       if (metadata?.keyvalues) uploadBuilder = uploadBuilder.keyvalues(metadata.keyvalues);
 
       const uploadResponse = await uploadBuilder;
       console.log('  Upload response:', uploadResponse);
 
-      // Convert CID to URL using gateway
-      const gatewayUrl = this.cidToGatewayUrl(uploadResponse.cid);
+      // Convert CID to URL using gateway (CORRECT WAY!)
+      const gatewayUrl = await pinata.gateways.public.convert(uploadResponse.cid);
 
       console.log('✅ JSON uploaded successfully!');
       console.log('  CID:', uploadResponse.cid);
@@ -136,13 +148,13 @@ export const pinataService = new PinataService();
 /**
  * Upload image to Pinata IPFS
  * @param file - Image file to upload
- * @returns IPFS URL to the uploaded image
+ * @returns Full upload response with CID and gateway URL
  */
-export async function uploadImageToPinata(file: File): Promise<string> {
+export async function uploadImageToPinata(file: File): Promise<PinataUploadResponse> {
   const result = await pinataService.uploadFile(file, {
     name: file.name,
   });
-  return result.gatewayUrl;
+  return result;
 }
 
 /**
